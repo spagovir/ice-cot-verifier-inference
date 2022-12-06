@@ -1,49 +1,69 @@
 # %%
 from __future__ import annotations
-
-from ice.recipe import recipe
 import numpy as np
 import numpy.random as rand
 import numpy.typing as npt
 import math
 from abc import ABC, abstractmethod
+from collections import deque
 
-from typing import Generic, TypeVar, Tuple, Awaitable, Callable, List
+from typing import Generic, TypeVar, Tuple, Callable, List, Dict
 
 # %%
 RT = TypeVar('RT')
 IT = TypeVar('IT')
 OT = TypeVar('OT')
 UpdateRule = Callable[[npt.NDArray[np.float32], int, float, float], npt.NDArray[np.float32]]
-Agent = Callable[[IT], Awaitable[Tuple[npt.NDArray[np.float32], List[OT]]]]
 
-class SearchTreeNode(ABC, Generic[IT, OT, RT]):
+"""
+To represent a wrapper around ice.Agent and the _openai complete method call 
+"""
+class Agent(ABC):
     @abstractmethod
-    async def rolloutAndUpdate(self, rule : UpdateRule, agent: Agent[IT, OT]) -> Tuple[float, float, RT, SearchTreeNode[IT,OT,RT]]:
+    async def predict(self, prompt : str) -> Tuple[npt.NDArray[np.float32], List[str]]:
+        pass
+    @abstractmethod
+    async def complete(self, prompt : str, stop : List[str]) -> Tuple[str, List[Tuple[npt.NDArray[np.float32], List[str], int]]]:
+        pass
+    @abstractmethod
+    async def classify(self, prompt : str, choices : Tuple[str, ...]) -> Dict[str,float]:
         pass
 
-class Leaf(SearchTreeNode[IT, OT, RT]):
+class SearchTreeNode(ABC, Generic[RT]):
+    """
+    seq represents a sequence of choices used to force rollouts to use an already explored path through the search tree.
+    predict/complete nodes currently ignore seq.
+    seq can be a partial path. 
+    """
+    @abstractmethod
+    async def rolloutAndUpdate(self, rule : UpdateRule, agent: Agent, seq : deque[int] = deque([])) -> Tuple[float, float, RT, SearchTreeNode[RT]]:
+        pass
+
+class Leaf(SearchTreeNode[RT]):
     def __init__(self, result : RT) -> None:
         self.result = result
-    async def rolloutAndUpdate(self, rule : UpdateRule, agent: Agent[IT,OT]) -> Tuple[float, float, RT, SearchTreeNode[IT,OT,RT]]:
+    async def rolloutAndUpdate(self, rule : UpdateRule, agent: Agent, seq : deque[int] = deque([])) -> Tuple[float, float, RT, SearchTreeNode[RT]]:
         return (0.0, 0.0, self.result, self)
 
-class ScoreNode(SearchTreeNode[IT, OT, RT]):
-    def __init__(self, score : float, child : SearchTreeNode[IT, OT, RT]):
+class ScoreNode(SearchTreeNode[RT]):
+    def __init__(self, score : float, child : SearchTreeNode[RT]):
         self.score = score
         self.child = child
-    async def rolloutAndUpdate(self, rule : UpdateRule, agent : Agent[IT, OT]) -> Tuple[float, float, RT, SearchTreeNode[IT,OT,RT]]:
-        score, logprob, result, update = await self.child.rolloutAndUpdate(rule, agent)
+    async def rolloutAndUpdate(self, rule : UpdateRule, agent : Agent, seq : deque[int] = deque([])) -> Tuple[float, float, RT, SearchTreeNode[RT]]:
+        score, logprob, result, update = await self.child.rolloutAndUpdate(rule, agent, seq)
         return (score + self.score, logprob, result, ScoreNode(self.score, update))
 
-class ChoiceNode(SearchTreeNode[IT, OT, RT]):
-    def __init__(self, scores : npt.NDArray[np.float32], logprobs : npt.NDArray[np.float32], children : List[SearchTreeNode[IT,OT,RT]]):
+class ChoiceNode(SearchTreeNode[RT]):
+    def __init__(self, scores : npt.NDArray[np.float32], logprobs : npt.NDArray[np.float32], children : List[SearchTreeNode[RT]]):
         self.scores = scores
         self.logprobs = logprobs
         self.children = children
-    async def rolloutAndUpdate(self, rule : UpdateRule, agent : Agent[IT, OT]) -> Tuple[float, float, RT, SearchTreeNode[IT,OT,RT]]:
-        idx = rand.choice(len(self.logprobs), None, p = np.exp(self.logprobs)/np.sum(np.exp(self.logprobs)))
-        score, logprob, result, update = await self.children[idx].rolloutAndUpdate(rule, agent)
+    async def rolloutAndUpdate(self, rule : UpdateRule, agent : Agent, seq : deque[int] = deque([]))-> Tuple[float, float, RT, SearchTreeNode[RT]]:
+        if seq:
+            idx = seq.popleft()
+        else: 
+            idx : int = rand.choice(len(self.logprobs), None, p = np.exp(self.logprobs)/np.sum(np.exp(self.logprobs)))
+        score, logprob, result, update = await self.children[idx].rolloutAndUpdate(rule, agent, seq)
         score += self.scores[idx]
         logprob += self.logprobs[idx]
         nlogprobs = rule(self.logprobs, idx, score, logprob)
@@ -51,15 +71,47 @@ class ChoiceNode(SearchTreeNode[IT, OT, RT]):
         nchildren[idx] = update
         return (score, logprob, result, ChoiceNode(self.scores, nlogprobs, nchildren))
 
-Program = Callable[[OT], SearchTreeNode[IT,OT,RT]]
-class DelayedNode(SearchTreeNode[IT, OT, RT]):
-    def __init__(self, prompt : IT, program : Program[OT, IT, RT]):
+Program = Callable[[IT], SearchTreeNode[RT]]
+class PredictNode(SearchTreeNode[RT]):
+    def __init__(self, prompt : str, program : Program[str, RT]):
         self.prompt = prompt
         self.program = program
-    async def rolloutAndUpdate(self, rule: UpdateRule, agent : Agent[IT, OT]) -> Tuple[float, float, RT, SearchTreeNode[IT,OT,RT]]:
-        logits, outputs = await agent(self.prompt)
+    async def rolloutAndUpdate(self, rule: UpdateRule, agent : Agent, seq : deque[int] = deque([])) -> Tuple[float, float, RT, SearchTreeNode[RT]]:
+        logits, outputs = await formatPredictAgent(self.prompt, agent)
         children = [self.program(output) for output in outputs]
         return await ChoiceNode(logits, logits, children).rolloutAndUpdate(rule, agent)
+
+class CompleteNode(SearchTreeNode[RT]):
+    def __init__(self, prompt : str, prefix : str,  program : Program[str, RT], stop : List[str] = []):
+        self.prompt = prompt
+        self.program = program
+        self.stop = stop
+        self.prefix = prefix
+    async def rolloutAndUpdate(self, rule: UpdateRule, agent: Agent, seq : deque[int] = deque([])) -> Tuple[float, float, RT, SearchTreeNode[RT]]:
+        result, steps = await agent.complete(self.prompt + self.prefix, self.stop)
+        prefix = self.prefix
+        nodes : List[SearchTreeNode[RT]]= []
+        prev : Tuple[ChoiceNode[RT], int] | None = None
+        seq = deque([])
+        for step in steps:
+            logprobs, child_strs, child = step
+            seq.append(child)
+            children : List[SearchTreeNode[RT]] = [CompleteNode(self.prompt, prefix + child_str, self.program, self.stop) for child_str in child_strs]
+            this_node = ChoiceNode[RT](logprobs, logprobs, children)
+            if prev is not None: 
+                prev_node, prev_child_idx = prev
+                prev_node.children[prev_child_idx] = this_node
+            prev = (this_node, child)
+            nodes.append(this_node)
+            prefix = prefix + child_strs[child]
+        if prev is not None:
+            prev_node, prev_child_idx = prev
+            prev_node.children[prev_child_idx] = self.program(self.prefix + result)
+            return await nodes[0].rolloutAndUpdate(rule, agent, seq)
+        else:
+            return await self.program(self.prefix + result).rolloutAndUpdate(rule, agent, seq)
+        
+
 
 """
 # Markov Chain Rule
@@ -103,18 +155,18 @@ def cleanUnicode(string : str) -> str:
     return string
 def checkRepeatWhitespace(string : str) -> bool:
     return (len(string) > 3) and string[3:].isspace()
-def generateStepR(prompt : str, stop : str | None, generated : str, prev_token : str) -> SearchTreeNode[str,str,str]:
+def generateStepR(prompt : str, stop : str | None, generated : str, prev_token : str) -> SearchTreeNode[str]:
     generated = generated + cleanUnicode(prev_token)
     if prev_token == EOT or (stop is not None and prev_token == stop) or checkRepeatWhitespace(generated):
         return Leaf(generated)
-    return DelayedNode(prompt + generated, generate(prompt, stop, generated))
-def generate(prompt : str, stop : str | None, generated : str = "") -> Program[str, str, str]:
+    return PredictNode(prompt + generated, generate(prompt, stop, generated))
+def generate(prompt : str, stop : str | None, generated : str = "") -> Program[str, str]:
     return (lambda prev_token: generateStepR(prompt, stop, generated, prev_token))
-def generateTree(prompt :str, stop : str | None) -> SearchTreeNode[str, str, str]:
-    return DelayedNode(prompt, generate(prompt, stop, ""))
+def generateTree(prompt :str, stop : str | None) -> SearchTreeNode[str]:
+    return PredictNode(prompt, generate(prompt, stop, ""))
 
-async def icePredictAgent(prompt : str) -> Tuple[npt.NDArray[np.float32], List[str]]:
-    probs = await recipe.agent().predict(context = prompt)
+async def formatPredictAgent(prompt : str, agent : Agent) -> Tuple[npt.NDArray[np.float32], List[str]]:
+    probs = await agent.predict(context = prompt)
     outputs = list(probs)
     logprobs = np.log(np.fromiter((probs[output] for output in outputs), np.float32, len(probs)))
     return (logprobs, outputs)
