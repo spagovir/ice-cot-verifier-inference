@@ -6,6 +6,9 @@ import numpy.typing as npt
 import math
 from abc import ABC, abstractmethod
 from collections import deque
+from ice.recipe import recipe
+from ice.apis.openai import openai_complete
+from ice.trace import TracedABC
 
 from typing import Generic, TypeVar, Tuple, Callable, List, Dict
 
@@ -15,19 +18,48 @@ IT = TypeVar('IT')
 OT = TypeVar('OT')
 UpdateRule = Callable[[npt.NDArray[np.float32], int, float, float], npt.NDArray[np.float32]]
 
+LOG_0 = -1e6
+
 """
 To represent a wrapper around ice.Agent and the _openai complete method call 
 """
-class Agent(ABC):
+class Agent(TracedABC):
+    '''
+    probably deprecate predict
+    '''
     @abstractmethod
     async def predict(self, prompt : str) -> Tuple[npt.NDArray[np.float32], List[str]]:
         pass
     @abstractmethod
-    async def complete(self, prompt : str, stop : List[str]) -> Tuple[str, List[Tuple[npt.NDArray[np.float32], List[str], int]]]:
+    async def complete(self, prompt : str, stop : str|None = None) -> Tuple[str, List[Tuple[npt.NDArray[np.float32], List[str], int]]]:
         pass
     @abstractmethod
     async def classify(self, prompt : str, choices : Tuple[str, ...]) -> Dict[str,float]:
         pass
+
+
+class WrappedICEAgent(Agent):
+    def __init__(self):
+        pass
+    async def predict(self, prompt: str) -> Tuple[npt.NDArray[np.float32], List[str]]:
+        probs = await recipe.agent().predict(context = prompt)
+        outputs = list(probs)
+        logprobs = np.log(np.fromiter((probs[output] for output in outputs), np.float32, len(probs)))
+        return (logprobs, outputs)
+    async def complete(self, prompt: str, stop: str | None = None) -> Tuple[str, List[Tuple[npt.NDArray[np.float32], List[str], int]]]:
+        response = await openai_complete(prompt, stop, temperature = 0.7, logprobs=5)
+        text : str= response['choices'][0]['text']
+        completion_length : int = response['usage']['completion_tokens'] + 1
+        tokens : List[str]= response['choices'][0]['logprobs']['tokens'][:completion_length]
+        token_logprobs : List[float] = response['choices'][0]['logprobs']['token_logprobs'][:completion_length]
+        logprob_dicts : List[Dict[str, float]]=  response['choices'][0]['logprobs']['top_logprobs'][:completion_length]
+        for token, token_logprob, logprob_dict in zip(tokens, token_logprobs, logprob_dicts):
+            logprob_dict[token] = token_logprob
+        steps = [(np.fromiter([logprob_dict[key] for key in list(logprob_dict)], dtype = np.float32), list(logprob_dict), list(logprob_dict).index(token)) for token, logprob_dict in zip(tokens, logprob_dicts)]
+        return(text, steps)
+    async def classify(self, prompt: str, choices: Tuple[str, ...]) -> Dict[str, float]:
+        pass
+
 
 class SearchTreeNode(ABC, Generic[RT]):
     """
@@ -77,12 +109,12 @@ class PredictNode(SearchTreeNode[RT]):
         self.prompt = prompt
         self.program = program
     async def rolloutAndUpdate(self, rule: UpdateRule, agent : Agent, seq : deque[int] = deque([])) -> Tuple[float, float, RT, SearchTreeNode[RT]]:
-        logits, outputs = await formatPredictAgent(self.prompt, agent)
+        logits, outputs = await agent.predict(self.prompt)
         children = [self.program(output) for output in outputs]
         return await ChoiceNode(logits, logits, children).rolloutAndUpdate(rule, agent)
 
 class CompleteNode(SearchTreeNode[RT]):
-    def __init__(self, prompt : str, prefix : str,  program : Program[str, RT], stop : List[str] = []):
+    def __init__(self, prompt : str, prefix : str,  program : Program[str, RT], stop : str | None =  None):
         self.prompt = prompt
         self.program = program
         self.stop = stop
@@ -103,7 +135,7 @@ class CompleteNode(SearchTreeNode[RT]):
                 prev_node.children[prev_child_idx] = this_node
             prev = (this_node, child)
             nodes.append(this_node)
-            prefix = prefix + child_strs[child]
+            prefix = prefix + cleanUnicode(child_strs[child])
         if prev is not None:
             prev_node, prev_child_idx = prev
             prev_node.children[prev_child_idx] = self.program(self.prefix + result)
@@ -164,13 +196,3 @@ def generate(prompt : str, stop : str | None, generated : str = "") -> Program[s
     return (lambda prev_token: generateStepR(prompt, stop, generated, prev_token))
 def generateTree(prompt :str, stop : str | None) -> SearchTreeNode[str]:
     return PredictNode(prompt, generate(prompt, stop, ""))
-
-async def formatPredictAgent(prompt : str, agent : Agent) -> Tuple[npt.NDArray[np.float32], List[str]]:
-    probs = await agent.predict(context = prompt)
-    outputs = list(probs)
-    logprobs = np.log(np.fromiter((probs[output] for output in outputs), np.float32, len(probs)))
-    return (logprobs, outputs)
-
-
-
-    
