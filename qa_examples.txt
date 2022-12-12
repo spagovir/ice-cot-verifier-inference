@@ -1,0 +1,12 @@
+Q: Rolf Landauer explored this man's thought experiment involving two chambers of separated gas and a creature known as his demon. Who was this man?
+A: Maxwell's demon is a thought experiment involving a demon who selectively lets molecules pass through the separation between two chambers of gas. The answer is Maxwell.
+
+Q: The Oren-Nayar model involves the diffuse type of this phenomenon and rough surfaces, while the specular type is associated with smooth surfaces. What is this phenomenon?
+A: Diffuse reflection describes when light reflects off of rough surfaces, while specular reflection describes how light reflects off smooth surfaces, such as mirrors. The answer is reflection.
+
+Q: This poem’s refrain describes women that “come and go, / Talking of Michelangelo.” What is this poem?
+A: T. S. Eliot's "The Love Song of J. Alfred Prufrock" has a refrain that describes women that "come and go, / Talking of Michelangelo." The answer is T. S. Eliot. 
+
+Q: This philosopher argues that human beings have a "characteristic activity" which concludes is "rational activity in accordance with virtue." Who is this philosopher?
+A: The "characteristic activity" argument comes from the first book of the Nicomachean Ethics, which concludes that it is "rational activity in accordance with virtue." The author of the Nicomachean Ethics is Aristotle. The answer is Aristotle.
+

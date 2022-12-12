@@ -2,9 +2,13 @@ from ice.recipe import recipe
 from ice.agent import Agent
 from ice.trace import TracedABC
 from ice.apis.openai import openai_complete
-from typing import List
+from typing import List, Tuple
+import programs
 import search_tree
-prompt = "A man goes to the doctor, says he is very depressed. The doctor says,"
+prompt = """
+In his latest speech, Boris Johnson quoted the opening line of the Odyssey: 
+
+"""
 
 '''
 Scores generated text based on whether it's a Pagliacci joke 
@@ -17,21 +21,21 @@ async def complete_test():
   answer = await recipe.agent().complete(prompt = prompt)
   return await recipe.agent().predict(context = prompt)
 
-async def test_generate_tree() -> List[str]:
+async def test_generate_tree() -> List[Tuple[str,float]]:
   tree = search_tree.generateTree(prompt, '.')
-  results : List[str] = []
+  results : List[Tuple[str,float]] = []
   for _ in range(2):
-    _, _, result, tree = await tree.rolloutAndUpdate(search_tree.mcrule(0.9), search_tree.icePredictAgent)
-    results.append(result)
+    score, _, result, tree = await tree.rolloutAndUpdate(search_tree.mcrule(0.7), search_tree.icePredictAgent)
+    results.append((result,score))
   return results
 
 async def test_openai_logprobs(): 
   return await openai_complete(prompt = prompt, logprobs = 5)
 
 async def test_complete_tree() -> List[str]:
-  tree = search_tree.CompleteNode(prompt, "", pagliacci)
+  tree = search_tree.CompleteNode(prompt, "", lambda text : search_tree.answer_and_score("Does the Odyssey quote above call Odysseus 'the man of many ways'?")(text))
   results : List[str] = []
-  for _ in range(100):
+  for _ in range(40):
     _, _, result, tree = await tree.rolloutAndUpdate(search_tree.mcrule(0.9), search_tree.WrappedICEAgent())
     results.append(result)
   return results
@@ -46,4 +50,20 @@ async def test_test_agent():
   test_agent = TestAgent("Hello: ")
   return await test_agent.test_trace('World!')
 
-recipe.main(test_complete_tree)
+async def test_qa() -> list[str]:
+  tree = programs.qa_program("This man wrote that 'All of Gaul was divided into three parts.' Who was this man?")
+  results : List[str] = []
+  for _ in range(40):
+    _, _, result, tree = await tree.rolloutAndUpdate(search_tree.mcrule(0.9), search_tree.WrappedICEAgent())
+    results.append(result)
+  return results
+  
+async def test_qa_verifier_attempt() -> list[str]:
+  tree = programs.cot_verifier_attempt("Robert Nozick makes 70k a year pre-tax. The first 10k dollars of income are exempt from tax, the marginal tax rate is 20%% between $10k and $50k, and 35%% on every dollar of income after $50k. What is Robert Nozick's post-tax income?")
+  results : List[str] = []
+  for _ in range(40):
+    _, _, result, tree = await tree.rolloutAndUpdate(search_tree.mcrule(0.9), search_tree.WrappedICEAgent())
+    results.append(result)
+  return results
+
+recipe.main(test_qa_verifier_attempt)

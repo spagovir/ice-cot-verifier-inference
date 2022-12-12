@@ -1,0 +1,20 @@
+Consider the following exchange:
+
+> Teacher: This philosopher argues that human beings have a "characteristic activity" which concludes is "rational activity in accordance with virtue." Who is this philosopher? 
+
+> Student: The "characteristic activity" argument comes from the first book of the Nicomachean Ethics, which concludes that it is "rational activity in accordance with virtue." The author of the Nicomachean Ethics is Aristotle. The answer is Aristotle. 
+
+Q: Is the student's answer correct? Answer choices: yes, no. 
+
+A: Aristotle is indeed the author of the Nicomachean Ethics, which originated the "characteristic activity" argument. The answer is yes. 
+
+Consider the following exchange:
+
+> Teacher: This philosopher argued that the self requires a calling or summons from another rational individual in order to recognizes itself as conscious, so mutual-recognition between rational individuals is a necessary condition for being an individual. Who is this philosopher? 
+
+> Student: The problem of recognition was first described in the master-slave dialect section of the Phenomenology of Spirit. The author of the Phenomenology of Spirit is Hegel. The answer is Hegel.
+
+Q: Is the student's answer correct? Answer choices: yes, no. 
+
+A: While Hegel's Phenomenology of Spirit does describe a struggle for recognition between master and slave, the problem of recognition actually originates in the earlier Foundations of Natural Right, which describes the calling as a precondition for selfhood. The Foundations of Natural Right was written by Ficthe, therefore the philosopher is Fichte not Hegel. The answer is no.   
+
