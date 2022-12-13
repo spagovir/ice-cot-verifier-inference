@@ -13,6 +13,10 @@ We can create a sampling method that converges to this distribution by
 3. start each sample by randomly going down the tree until we reached a possible next token choice we haven't tried yet, and letting GPT-3 complete the generation from there. 
 4. updating the weights each generated node keeps for the next token choice toward the probability of the next token conditional on the verifier passing as estimated from the result of the sample. 
 
+We still weight the contribution of each sample by the ratio of 
+their true (unnormalized) probability weight and the probability 
+they get chosen, but in theory this eventually converges to 1. 
+
 This project implements that method and uses it to implement chain-of-thought self-consistency with verifiers. 
 
 ## Modules
