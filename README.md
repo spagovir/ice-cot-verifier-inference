@@ -26,6 +26,9 @@ Programs are designed to take continuations so they can be chained with other pr
 ## Installing
 This project depends on `ought-ice`, which can be installed by following the instructions here: https://github.com/oughtinc/ice. 
 
+## What's it good for?
+Right now it seems that it shows the biggest improvement vs vanilla GPT-3 at doing ~6th grade level math word problems.
+
 ## Possible Next Steps
 - Integrate with amplification/subquestions?
 - Summarize the reasoning path marginalized over to get the answer? (+ possibly verifier criticism?)
@@ -33,3 +36,6 @@ This project depends on `ought-ice`, which can be installed by following the ins
 - Return a confidence score (posterior probability of answer w/ uncertainty adjustment based on total probability mass explored and size of region that passes verifier) + runner up answers?
 - I'm still don't think unicode handling is totally correct. 
 - Better integration with rest of ICE framework.
+- Allow running multiple exploration attempts in parallel and then doing a batch update. At the difficulties it's most useful for, it's pretty excruciatingly slow. 
+- Sometimes answers overflow and start trying to imagine a next question. Figure out a better way to prevent that. 
+- Sometimes the verifier hallucinates reasons the solution is wrong. Try to figure out why that happens/how to prevent?

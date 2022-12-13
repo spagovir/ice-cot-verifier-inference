@@ -21,7 +21,7 @@ beth_bakes = "Beth bakes 4x 2 dozen batches of cookies in a week. If these cooki
 # the end result to be reliably correct. 
 nozicks_taxes = "Robert Nozick makes 70k a year pre-tax. The first 10k dollars of income are exempt from tax, the marginal tax rate is 20%% between $10k and $50k, and 35%% on every dollar of income after $50k. What is Robert Nozick's post-tax income?"
 
-default_question = amc8_2022_p7
+default_question = nozicks_taxes
 
 # We try to marginalize over different chains of thoughts behind an answer, 
 # trying to choose the answer with the highest _posterior probability_ 

@@ -43,8 +43,8 @@ def verifier_program(question : str, continuation : Callable[[str], SearchTreeNo
         def process_verifier_response(response : str) -> SearchTreeNode[RT]:
             nonlocal prompt
             nonlocal answer
-            if "The answer is " in response:
-                idx = response.index('The answer is ')
+            if "he answer is " in response:
+                idx = response.rindex('he answer is ')
                 return ScoreNode(0 if 'yes' in response[idx:] else LOG_0, continuation(answer))
             else:
                 nonlocal prompt
@@ -54,15 +54,15 @@ def verifier_program(question : str, continuation : Callable[[str], SearchTreeNo
 def extract(prompt : str) -> Program[str, str]:
     def extract_answer(answer : str) -> SearchTreeNode[str]:
         nonlocal prompt
-        if 'The answer is ' in answer:
-            return Leaf(answer[answer.index('The answer is ') + 14:].strip())
+        if 'he answer is ' in answer:
+            return Leaf(answer[answer.rindex('he answer is ') + 13:].strip())
         else:
             return CompleteNode(prompt + answer + ' The answer is ', '', lambda s : Leaf(s.strip()))
     return extract_answer
 def force_answer(prompt : str, continuation : Program[str, str]) -> Program[str, str]:
     def force(answer : str) -> SearchTreeNode[str]:
         nonlocal prompt
-        if 'The answer is ' in answer:
+        if 'he answer is ' in answer:
             return continuation(answer)
         else:
             return CompleteNode(prompt, answer + ' The answer is ', continuation)
