@@ -1,6 +1,6 @@
 # Chain-of-thought self-consistency with verifiers. 
 
-Chain-of-thought self-consistency is a technique where we use a large language model to sample multiple chains-of-thought in response to a question, and return the answer supported by the most chains of thought.
+Chain-of-thought self-consistency (https://arxiv.org/abs/2203.11171) is a technique where we use a large language model to sample multiple chains-of-thought in response to a question, and return the answer supported by the most chains of thought.
 We can integrate self-consistency with verifiers by weighting the contribution of each chain-of-thought by the probability the verifier outputs that the chain-of-thought is correct.
 
 However, if the question is rather difficult,
@@ -25,3 +25,11 @@ Programs are designed to take continuations so they can be chained with other pr
 
 ## Installing
 This project depends on `ought-ice`, which can be installed by following the instructions here: https://github.com/oughtinc/ice. 
+
+## Possible Next Steps
+- Integrate with amplification/subquestions?
+- Summarize the reasoning path marginalized over to get the answer? (+ possibly verifier criticism?)
+- Add option to request human input when verifier is uncertain?
+- Return a confidence score (posterior probability of answer w/ uncertainty adjustment based on total probability mass explored and size of region that passes verifier) + runner up answers?
+- I'm still don't think unicode handling is totally correct. 
+- Better integration with rest of ICE framework.
