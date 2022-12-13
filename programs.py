@@ -25,6 +25,7 @@ def make_qa_prompt(question : str) -> str:
 def qa_program(question : str, continuation : Callable[[str], SearchTreeNode[RT]]) -> SearchTreeNode[RT]:
     return CompleteNode(make_qa_prompt(question), "", lambda x : continuation(x))
 
+# We also have verifier do chain-of-thought reasoning. 
 def verifier_program(question : str, continuation : Callable[[str], SearchTreeNode[RT]]) -> Program[str, RT]:
     def make_verification_prompt(question : str, answer : str) -> str:
         return verify_prefix \
@@ -69,9 +70,7 @@ def force_answer(prompt : str, continuation : Program[str, str]) -> Program[str,
 
 def cot_verifier_attempt(question : str) -> SearchTreeNode[str]:
     return qa_program(question
-    , force_answer(make_qa_prompt(question)
-    , verifier_program(question
-    , extract(make_qa_prompt(question)))))
+    , force_answer(make_qa_prompt(question), verifier_program(question, extract(make_qa_prompt(question)))))
 
 """
 class ProgramRMonad(ABC, Generic[IT]):

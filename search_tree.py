@@ -8,7 +8,7 @@ from abc import ABC, abstractmethod
 from collections import deque
 from ice.recipe import recipe
 from ice.apis.openai import openai_complete
-from ice.agents.openai import OpenAIAgent
+from ice.agents.openai import OpenAIAgent, Agent
 from ice.trace import TracedABC
 
 from typing import Generic, TypeVar, Tuple, Callable, List, Dict
@@ -22,22 +22,19 @@ UpdateRule = Callable[[npt.NDArray[np.float32], int, float, float, float], npt.N
 LOG_0 = -1e6
 
 """
-Like ice.agent, but complete also returns logprobs
+Like ice.agent, but complete_logprobs also returns logprobs
 """
-class Agent(TracedABC):
+class LogprobsAgent(Agent):
     @abstractmethod
-    async def complete(self, prompt : str, stop : str|None = None) -> Tuple[str, List[Tuple[npt.NDArray[np.float32], List[str], int]]]:
-        pass
-    @abstractmethod
-    async def classify(self, prompt : str, choices : Tuple[str, ...]) -> Dict[str,float]:
+    async def complete_logprobs(self, prompt : str, stop : str|None = None) -> Tuple[str, List[Tuple[npt.NDArray[np.float32], List[str], int]]]:
         pass
 
 # Mostly a wrapper oaround OpenAI Agent. We need to grab the logprobs for complete though, 
 # so we can't use the complete method of vanilla OpenAI Agent complete. 
-class WrappedICEAgent(Agent):
+class WrappedICEAgent(OpenAIAgent, LogprobsAgent):
     def __init__(self):
-        pass
-    async def complete(self, prompt: str, stop: str | None = None) -> Tuple[str, List[Tuple[npt.NDArray[np.float32], List[str], int]]]:
+        super().__init__()
+    async def complete_logprobs(self, prompt: str, stop: str | None = None) -> Tuple[str, List[Tuple[npt.NDArray[np.float32], List[str], int]]]:
         response = await openai_complete(prompt, stop, temperature = 0.7, logprobs=5)
         text : str= response['choices'][0]['text']
         if 'completion_tokens' in response['usage']: 
@@ -51,8 +48,6 @@ class WrappedICEAgent(Agent):
             logprob_dict[token] = token_logprob
         steps = [(np.fromiter([logprob_dict[key] for key in list(logprob_dict)], dtype = np.float32), list(logprob_dict), list(logprob_dict).index(token)) for token, logprob_dict in zip(tokens, logprob_dicts)]
         return(text, steps)
-    async def classify(self, prompt: str, choices: Tuple[str, ...]) -> Dict[str, float]:
-        return (await OpenAIAgent().classify(prompt = prompt, choices = choices))[0]
 
 """
 Represents a search tree to search through possible evaluations of a non-deterministic program 
@@ -73,27 +68,27 @@ class SearchTreeNode(ABC, Generic[RT]):
     seq can be a partial path. 
     """
     @abstractmethod
-    async def rolloutAndUpdate(self, rule : UpdateRule, agent: Agent, seq : deque[int] = deque([])) -> Tuple[float, float, RT, SearchTreeNode[RT]]:
+    async def rolloutAndUpdate(self, rule : UpdateRule, agent: LogprobsAgent, seq : deque[int] = deque([])) -> Tuple[float, float, RT, SearchTreeNode[RT]]:
         pass
 
 class TracedSearchTreeWrapper(SearchTreeNode[RT], TracedABC):
     def __init__(self, wrapped : SearchTreeNode[RT]):
         self.wrapped = wrapped
-    async def rolloutAndUpdate(self, rule: UpdateRule, agent: Agent, seq: deque[int] = deque([])) -> Tuple[float, float, RT, SearchTreeNode[RT]]:
+    async def rolloutAndUpdate(self, rule: UpdateRule, agent: LogprobsAgent, seq: deque[int] = deque([])) -> Tuple[float, float, RT, SearchTreeNode[RT]]:
         score, logprob, result, update = await self.wrapped.rolloutAndUpdate(rule, agent, seq)
         return (score, logprob, result, TracedSearchTreeWrapper(update))
 
 class Leaf(SearchTreeNode[RT]):
     def __init__(self, result : RT) -> None:
         self.result = result
-    async def rolloutAndUpdate(self, rule : UpdateRule, agent: Agent, seq : deque[int] = deque([])) -> Tuple[float, float, RT, SearchTreeNode[RT]]:
+    async def rolloutAndUpdate(self, rule : UpdateRule, agent: LogprobsAgent, seq : deque[int] = deque([])) -> Tuple[float, float, RT, SearchTreeNode[RT]]:
         return (0.0, 0.0, self.result, self)
 
 class ScoreNode(SearchTreeNode[RT]):
     def __init__(self, score : float, child : SearchTreeNode[RT]):
         self.score = score
         self.child = child
-    async def rolloutAndUpdate(self, rule : UpdateRule, agent : Agent, seq : deque[int] = deque([])) -> Tuple[float, float, RT, SearchTreeNode[RT]]:
+    async def rolloutAndUpdate(self, rule : UpdateRule, agent : LogprobsAgent, seq : deque[int] = deque([])) -> Tuple[float, float, RT, SearchTreeNode[RT]]:
         score, logprob, result, update = await self.child.rolloutAndUpdate(rule, agent, seq)
         return (score + self.score, logprob, result, ScoreNode(self.score, update))
 
@@ -103,7 +98,7 @@ class ChoiceNode(SearchTreeNode[RT]):
         self.logprobs = logprobs
         self.children = children
         self.visits = visits
-    async def rolloutAndUpdate(self, rule : UpdateRule, agent : Agent, seq : deque[int] = deque([]))-> Tuple[float, float, RT, SearchTreeNode[RT]]:
+    async def rolloutAndUpdate(self, rule : UpdateRule, agent : LogprobsAgent, seq : deque[int] = deque([]))-> Tuple[float, float, RT, SearchTreeNode[RT]]:
         if seq:
             idx = seq.popleft()
         else: 
@@ -116,15 +111,20 @@ class ChoiceNode(SearchTreeNode[RT]):
         nchildren[idx] = update
         return (score, logprob, result, ChoiceNode(self.scores, nlogprobs, nchildren, self.visits + 1))
 
+# Program is a continuation that takes the result of a GPT-3 completion request 
+# and chooses what to do next (eg, answer extraction or running a verifier)
 Program = Callable[[IT], SearchTreeNode[RT]]
+
+''' no longer used
 class PredictNode(SearchTreeNode[RT]):
     def __init__(self, prompt : str, program : Program[str, RT]):
         self.prompt = prompt
         self.program = program
-    async def rolloutAndUpdate(self, rule: UpdateRule, agent : Agent, seq : deque[int] = deque([])) -> Tuple[float, float, RT, SearchTreeNode[RT]]:
-        logits, outputs = await agent.predict(self.prompt)
+    async def rolloutAndUpdate(self, rule: UpdateRule, agent : LogprobsAgent, seq : deque[int] = deque([])) -> Tuple[float, float, RT, SearchTreeNode[RT]]:
+        logits, outputs = await agent.predict(context = self.prompt)
         children = [self.program(output) for output in outputs]
         return await ChoiceNode(logits, logits, children).rolloutAndUpdate(rule, agent)
+'''
 
 class CompleteNode(SearchTreeNode[RT]):
     def __init__(self, prompt : str, prefix : str,  program : Program[str, RT], stop : str | None =  None):
@@ -132,8 +132,8 @@ class CompleteNode(SearchTreeNode[RT]):
         self.program = program
         self.stop = stop
         self.prefix = prefix
-    async def rolloutAndUpdate(self, rule: UpdateRule, agent: Agent, seq : deque[int] = deque([])) -> Tuple[float, float, RT, SearchTreeNode[RT]]:
-        result, steps = await agent.complete(self.prompt + self.prefix, self.stop)
+    async def rolloutAndUpdate(self, rule: UpdateRule, agent: LogprobsAgent, seq : deque[int] = deque([])) -> Tuple[float, float, RT, SearchTreeNode[RT]]:
+        result, steps = await agent.complete_logprobs(self.prompt + self.prefix, self.stop)
         prefix = self.prefix
         nodes : List[SearchTreeNode[RT]]= []
         prev : Tuple[ChoiceNode[RT], int] | None = None
@@ -161,8 +161,8 @@ class ClassifyNode(SearchTreeNode[RT]):
         self.prompt = prompt
         self.choices = choices
         self.program = program
-    async def rolloutAndUpdate(self, rule: UpdateRule, agent: Agent, seq: deque[int] = deque([])) -> Tuple[float, float, RT, SearchTreeNode[RT]]:
-        cats = await agent.classify(self.prompt, self.choices)
+    async def rolloutAndUpdate(self, rule: UpdateRule, agent: LogprobsAgent, seq: deque[int] = deque([])) -> Tuple[float, float, RT, SearchTreeNode[RT]]:
+        cats = (await agent.classify(prompt = self.prompt, choices = self.choices))[0]
         return await self.program(cats).rolloutAndUpdate(rule, agent)
 
 
@@ -207,6 +207,8 @@ def cleanUnicode(string : str) -> str:
     return string
 def checkRepeatWhitespace(string : str) -> bool:
     return (len(string) > 3) and string[3:].isspace()
+
+''' no longer used
 def generateStepR(prompt : str, stop : str | None, generated : str, prev_token : str) -> SearchTreeNode[str]:
     generated = generated + cleanUnicode(prev_token)
     if prev_token == EOT or (stop is not None and prev_token == stop) or checkRepeatWhitespace(generated):
@@ -218,16 +220,21 @@ def generateTree(prompt :str, stop : str | None) -> SearchTreeNode[str]:
     return PredictNode(prompt, generate(prompt, stop, ""))
 
 '''
+
 '''
+no longer used
 def condition_on_yes(retNode : SearchTreeNode[RT]) -> Program[dict[str,float],RT]:
     def program(cats : dict[str,float]) -> SearchTreeNode[RT]:
         nonlocal retNode
         return ScoreNode(math.log(cats[' yes']) if cats[' yes'] != 0 else LOG_0, retNode)
     return program
+'''
 
 '''
 A program that answers a Yes/No question about a text, conditions on that question being 'Yes', and returns the text.
 '''
+
+''' no longer used
 def answer_and_score(question : str) -> Program[str, str]:
     def answer_context_and_score(context : str) -> SearchTreeNode[str]:
         nonlocal question
@@ -246,3 +253,4 @@ def answer_and_score(question : str) -> Program[str, str]:
             """
         return ClassifyNode(prompt, (' Yes', ' No'), condition_on_yes(Leaf(context)))
     return answer_context_and_score
+'''

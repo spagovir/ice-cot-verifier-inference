@@ -21,22 +21,24 @@ async def complete_test():
   answer = await recipe.agent().complete(prompt = prompt)
   return await recipe.agent().predict(context = prompt)
 
+'''
 async def test_generate_tree() -> List[Tuple[str,float]]:
   tree = search_tree.generateTree(prompt, '.')
   results : List[Tuple[str,float]] = []
   for _ in range(2):
-    score, _, result, tree = await tree.rolloutAndUpdate(search_tree.mcrule(0.7), search_tree.icePredictAgent)
+    score, _, result, tree = await tree.rolloutAndUpdate(search_tree.mcrule(), search_tree.icePredictAgent)
     results.append((result,score))
   return results
+'''
 
 async def test_openai_logprobs(): 
   return await openai_complete(prompt = prompt, logprobs = 5)
 
 async def test_complete_tree() -> List[str]:
-  tree = search_tree.CompleteNode(prompt, "", lambda text : search_tree.answer_and_score("Does the Odyssey quote above call Odysseus 'the man of many ways'?")(text))
+  tree = search_tree.CompleteNode(prompt, "", lambda text : search_tree.Leaf(text))
   results : List[str] = []
   for _ in range(40):
-    _, _, result, tree = await tree.rolloutAndUpdate(search_tree.mcrule(0.9), search_tree.WrappedICEAgent())
+    _, _, result, tree = await tree.rolloutAndUpdate(search_tree.mcrule, search_tree.WrappedICEAgent())
     results.append(result)
   return results
 
@@ -50,11 +52,12 @@ async def test_test_agent():
   test_agent = TestAgent("Hello: ")
   return await test_agent.test_trace('World!')
 
+
 async def test_qa() -> list[str]:
-  tree = programs.qa_program("This man wrote that 'All of Gaul was divided into three parts.' Who was this man?")
+  tree = programs.qa_program("This man wrote that 'All of Gaul was divided into three parts.' Who was this man?", lambda x : search_tree.Leaf(x))
   results : List[str] = []
   for _ in range(40):
-    _, _, result, tree = await tree.rolloutAndUpdate(search_tree.mcrule(0.9), search_tree.WrappedICEAgent())
+    _, _, result, tree = await tree.rolloutAndUpdate(search_tree.mcrule, search_tree.WrappedICEAgent())
     results.append(result)
   return results
   
@@ -62,7 +65,7 @@ async def test_qa_verifier_attempt() -> list[str]:
   tree = programs.cot_verifier_attempt("Robert Nozick makes 70k a year pre-tax. The first 10k dollars of income are exempt from tax, the marginal tax rate is 20%% between $10k and $50k, and 35%% on every dollar of income after $50k. What is Robert Nozick's post-tax income?")
   results : List[str] = []
   for _ in range(40):
-    _, _, result, tree = await tree.rolloutAndUpdate(search_tree.mcrule(0.9), search_tree.WrappedICEAgent())
+    _, _, result, tree = await tree.rolloutAndUpdate(search_tree.mcrule, search_tree.WrappedICEAgent())
     results.append(result)
   return results
 
